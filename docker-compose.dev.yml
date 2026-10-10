@@ -1,0 +1,34 @@
+# Local API and dev infrastructure. Staging/production point
+# DATABASE_URL at real Neon instead of this file.
+services:
+  api:
+    # Published API image. Compose pulls the current Docker Hub tag on every `up`.
+    image: mankhb2k/neonix-api:latest
+    pull_policy: always
+    # For a local source build, comment `image`/`pull_policy` above and enable:
+    # build:
+    #   context: ../..
+    #   dockerfile: apps/api/Dockerfile
+    env_file:
+      - .env
+    environment:
+      PORT: 8080
+      BETTER_AUTH_URL: http://localhost:8080
+      WEB_APP_URL: http://localhost:3000
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: api
+      POSTGRES_PASSWORD: api
+      POSTGRES_DB: api
+    ports:
+      - "5433:5432"
+    volumes:
+      - api-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  api-postgres-data:
