@@ -1,27 +1,19 @@
-# Build from the monorepo root: docker build -f apps/api/Dockerfile -t neonix-api .
-#
-# Multi-stage, same shape as the other Cloud Run images: the builder
-# does a full workspace install, then `pnpm deploy --prod` prunes to just
-# @motionvideo/api plus its production workspace/external dependencies (no
-# devDependencies - eslint, vitest, drizzle-kit, tsx - reach the runtime image).
 FROM node:22-bookworm-slim AS builder
-
-WORKDIR /workspace
-COPY . .
-RUN corepack enable && pnpm install --frozen-lockfile
-# .dockerignore excludes every package's dist/, so workspace dependencies that
-# ship a dist build (motion-mcp's remote bundle) are rebuilt here.
-RUN pnpm --filter "@motionvideo/api..." --if-present run build
-RUN pnpm --filter @motionvideo/api deploy --prod --legacy /app
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-lock.yaml* ./
+RUN pnpm install
+COPY tsconfig.json ./
+COPY src ./src
+RUN pnpm build
+RUN pnpm prune --prod
 
 FROM node:22-bookworm-slim
-
 WORKDIR /app
-COPY --from=builder /app .
-COPY --from=builder /workspace/apps/api/dist ./dist
-
 ENV NODE_ENV=production
-
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY package.json ./
+COPY certs ./certs
 EXPOSE 8080
-
 CMD ["node", "dist/main.js"]

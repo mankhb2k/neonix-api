@@ -1,12 +1,10 @@
-import { createHash } from "node:crypto";
 import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
-import { and, eq, isNull } from "drizzle-orm";
 import { fromNodeHeaders } from "better-auth/node";
 import type { Request } from "express";
 import { ApiError } from "../common/api-error";
-import { db } from "../db/client";
-import { apiKeys } from "../db/schema/api-keys";
+import { env } from "../env";
 import { auth } from "./auth";
+import { ensureDevUser } from "./dev-auth";
 
 declare module "express" {
   interface Request {
@@ -18,20 +16,12 @@ declare module "express" {
 export class CurrentUserGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
-    const authorization = request.headers.authorization;
-    if (authorization?.startsWith("Bearer ")) {
-      const token = authorization.slice("Bearer ".length).trim();
-      if (token.startsWith("nx_live_")) {
-        const keyHash = createHash("sha256").update(token).digest("hex");
-        const key = await db.query.apiKeys.findFirst({
-          where: and(eq(apiKeys.keyHash, keyHash), isNull(apiKeys.revokedAt)),
-        });
-        if (key) {
-          request.userId = key.userId;
-          void db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, key.id)).catch(() => undefined);
-          return true;
-        }
-      }
+    const devUser = env.devAuthBypass ? request.headers["x-dev-user"] : undefined;
+    if (typeof devUser === "string" && /^[\w.-]{3,60}$/.test(devUser)) {
+      const role = request.headers["x-dev-role"];
+      await ensureDevUser(devUser, typeof role === "string" ? role : undefined);
+      request.userId = devUser;
+      return true;
     }
     const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
     if (!session) throw new ApiError(401, "Not authenticated");

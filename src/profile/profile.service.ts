@@ -1,95 +1,53 @@
-import { randomUUID } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import { ApiError } from "../common/api-error";
+import { CreditsService } from "../credits/credits.service";
 import type { Database } from "../db/client";
 import { DATABASE } from "../db/database.module";
-import { profiles } from "../db/schema/identity";
-import { avatarObjectKey, R2Service } from "../r2/r2.service";
-
-const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
-const ALLOWED_AVATAR_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
-
-function requiredEnv(name: string): string {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`Missing ${name}`);
-  return value;
-}
-
-function avatarPublicUrl(key: string): string {
-  return `${requiredEnv("R2_AVATARS_PUBLIC_URL").replace(/\/$/, "")}/${key}`;
-}
+import { user } from "../db/schema/auth";
+import { profiles } from "../db/schema/profile";
+import { avatarKey, imageExtension, R2Service } from "../r2/r2.service";
 
 @Injectable()
 export class ProfileService {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     private readonly r2: R2Service,
+    private readonly credits: CreditsService,
   ) {}
 
-  async getProfile(userId: string) {
+  async get(userId: string) {
     const profile = await this.db.query.profiles.findFirst({ where: eq(profiles.id, userId) });
     if (!profile) throw new ApiError(404, "Profile not found");
-    return profile;
+    return {
+      id: profile.id,
+      displayName: profile.displayName,
+      avatarUrl: this.r2.publicUrl("avatars", profile.avatarKey),
+      role: profile.role,
+      balance: await this.credits.getBalance(userId),
+    };
   }
 
-  async updateDisplayName(userId: string, displayName: string) {
-    const [updated] = await this.db
-      .update(profiles)
-      .set({ displayName, updatedAt: new Date() })
-      .where(eq(profiles.id, userId))
-      .returning();
-    if (!updated) throw new ApiError(404, "Profile not found");
-    return updated;
-  }
-
-  async uploadAvatar(userId: string, file: { buffer: Buffer; mimetype: string; size: number }) {
-    if (!ALLOWED_AVATAR_TYPES.has(file.mimetype)) {
-      throw new ApiError(400, "Use a JPEG, PNG, WebP, or GIF image.");
+  async update(userId: string, patch: { displayName?: string; avatarKey?: string }) {
+    if (patch.avatarKey !== undefined && !patch.avatarKey.startsWith(`avatars/${userId}/`)) {
+      throw new ApiError(400, "Invalid avatar key", "INVALID_KEY");
     }
-    if (file.size < 1 || file.size > MAX_AVATAR_BYTES) {
-      throw new ApiError(400, "Avatar images must be smaller than 5 MB.");
-    }
-
-    const existing = await this.db.query.profiles.findFirst({ where: eq(profiles.id, userId) });
-    if (!existing) throw new ApiError(404, "Profile not found");
-
-    const key = avatarObjectKey(userId, randomUUID(), file.mimetype);
-    await this.r2.putObject("R2_AVATARS_BUCKET", { key, body: file.buffer, contentType: file.mimetype });
-    const avatarUrl = avatarPublicUrl(key);
-    const avatarUpdatedAt = new Date();
-
-    const [updated] = await this.db
-      .update(profiles)
-      .set({
-        avatarUrl,
-        avatarPath: key,
-        avatarMimeType: file.mimetype,
-        avatarSizeBytes: file.size,
-        avatarUpdatedAt,
-        updatedAt: avatarUpdatedAt,
-      })
-      .where(eq(profiles.id, userId))
-      .returning();
-
-    const previousAvatarPath = existing.avatarPath;
-    if (previousAvatarPath && previousAvatarPath !== key) {
-      await this.r2.deleteObject("R2_AVATARS_BUCKET", previousAvatarPath).catch(() => undefined);
-    }
-
-    return updated;
-  }
-
-  async removeAvatar(userId: string) {
-    const existing = await this.db.query.profiles.findFirst({ where: eq(profiles.id, userId) });
-    if (!existing) throw new ApiError(404, "Profile not found");
-    if (!existing.avatarPath) return { avatarUrl: null };
-
-    await this.r2.deleteObject("R2_AVATARS_BUCKET", existing.avatarPath);
     await this.db
       .update(profiles)
-      .set({ avatarUrl: null, avatarPath: null, avatarMimeType: null, avatarSizeBytes: null, avatarUpdatedAt: null, updatedAt: new Date() })
+      .set({ ...patch, updatedAt: new Date() })
       .where(eq(profiles.id, userId));
-    return { avatarUrl: null };
+    return this.get(userId);
+  }
+
+  async createAvatarUpload(userId: string, contentType: string) {
+    const ext = imageExtension(contentType);
+    if (!ext || contentType === "video/mp4") throw new ApiError(400, "Avatar must be png, jpeg or webp", "UNSUPPORTED_TYPE");
+    const key = avatarKey(userId, ext);
+    return { key, upload: await this.r2.presignPut("avatars", key, contentType) };
+  }
+
+  /** In-app account deletion (App Store requirement); FK cascades remove the rest. */
+  async deleteAccount(userId: string) {
+    await this.db.delete(user).where(eq(user.id, userId));
   }
 }

@@ -1,122 +1,79 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
-import { AuthzService } from "../authz/authz.service";
+import { and, eq, sql } from "drizzle-orm";
 import { ApiError } from "../common/api-error";
+import { CreditsService } from "../credits/credits.service";
 import type { Database } from "../db/client";
 import { DATABASE } from "../db/database.module";
-import { projects } from "../db/schema/projects";
-import { htmlRenderJobs } from "../db/schema/render";
-import { QuotasService } from "../quotas/quotas.service";
-import { R2Service } from "../r2/r2.service";
+import { templatePurchases, templateVersions, templates } from "../db/schema/templates";
 
-const TREND_DAYS = 14;
-const RECENT_LIMIT = 5;
-const DOWNLOAD_TTL_SECONDS = 300;
-
+// Export itself runs on the user's device. The server only decides whether it is paid for.
+//
+// A template is bought once, by its first export: the template's credit price is spent and the template is
+// the user's for good - every later export of it, of any project, is free. (Pro add-ons will be separate
+// purchases on top, not a per-export fee.) The package download itself is always free
+// (GET /v1/templates/:id/package): people must be able to open a template before paying for it.
 @Injectable()
 export class ExportsService {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
-    private readonly authz: AuthzService,
-    private readonly quotas: QuotasService,
-    private readonly r2: R2Service,
+    private readonly credits: CreditsService,
   ) {}
 
-  private async requireViewer(userId: string, workspaceId: string) {
-    const canView = await this.authz.hasWorkspaceRole(userId, workspaceId, "viewer");
-    if (!canView) throw new ApiError(404, "Workspace not found");
-  }
+  /**
+   * Call right before rendering. Owned template: free, just counted. Not owned yet: spends the credits and
+   * records the purchase in one transaction (not enough credits = 402, nothing recorded). Safe to retry and
+   * to double-tap: the wallet lock serializes requests per user, so the second call sees the purchase.
+   */
+  async create(userId: string, input: { templateId: string; versionId?: string }) {
+    return this.db.transaction(async (tx) => {
+      await this.credits.lockWallet(tx, userId);
 
-  async list(userId: string, workspaceId: string) {
-    await this.requireViewer(userId, workspaceId);
-    const rows = await this.db
-      .select({
-        job: htmlRenderJobs,
-        projectTitle: projects.title,
-      })
-      .from(htmlRenderJobs)
-      .leftJoin(projects, eq(projects.id, htmlRenderJobs.projectId))
-      .where(eq(htmlRenderJobs.workspaceId, workspaceId))
-      .orderBy(desc(htmlRenderJobs.createdAt))
-      .limit(200);
+      const [owned] = await tx
+        .update(templatePurchases)
+        .set({ exportCount: sql`${templatePurchases.exportCount} + 1`, lastExportedAt: new Date() })
+        .where(and(eq(templatePurchases.userId, userId), eq(templatePurchases.templateId, input.templateId)))
+        .returning({ id: templatePurchases.id });
+      if (owned) {
+        return { purchaseId: owned.id, owned: true, charged: false, creditsCharged: 0, balance: await this.credits.getBalance(userId) };
+      }
 
-    return rows.map(({ job, projectTitle }) => ({
-      id: job.id,
-      projectId: job.projectId,
-      projectTitle,
-      status: job.status,
-      progress: job.status === "done" ? 1 : 0,
-      error: job.errorMessage,
-      outputKey: job.outputKey,
-      durationMs: job.durationMs,
-      fps: job.fps,
-      costVnd: job.costVnd,
-      outputBytes: job.outputBytes,
-      createdAt: job.createdAt.toISOString(),
-    }));
-  }
+      const template = await tx.query.templates.findFirst({ where: eq(templates.id, input.templateId) });
+      if (!template || template.status !== "published" || !template.currentVersionId) throw new ApiError(404, "Template not found");
+      // The project may have been started from an older version; it must still be an approved one of this template.
+      const version = await tx.query.templateVersions.findFirst({
+        where: and(
+          eq(templateVersions.id, input.versionId ?? template.currentVersionId),
+          eq(templateVersions.templateId, input.templateId),
+          eq(templateVersions.status, "approved"),
+        ),
+      });
+      if (!version) throw new ApiError(404, "Version not found");
 
-  async summary(userId: string, workspaceId: string) {
-    await this.requireViewer(userId, workspaceId);
+      const [purchase] = await tx
+        .insert(templatePurchases)
+        .values({
+          userId,
+          templateId: input.templateId,
+          versionId: version.id,
+          creditsCharged: template.creditCost,
+          creatorId: template.creatorId,
+          creatorEarningVnd: template.creatorEarningVnd,
+        })
+        .returning();
+      const { balance } =
+        template.creditCost > 0
+          ? await this.credits.applyDelta(tx, {
+              userId,
+              delta: -template.creditCost,
+              reason: "template_purchase",
+              refId: purchase.id,
+              idempotencyKey: `template-purchase:${purchase.id}`,
+            })
+          : { balance: await this.credits.getBalance(userId) };
+      // use_count = how many users own the template.
+      await tx.update(templates).set({ useCount: sql`${templates.useCount} + 1` }).where(eq(templates.id, input.templateId));
 
-    const done = and(eq(htmlRenderJobs.workspaceId, workspaceId), eq(htmlRenderJobs.status, "done"));
-
-    const [totals] = await this.db
-      .select({
-        count: sql<string>`count(*)`,
-        durationMs: sql<string>`coalesce(sum(${htmlRenderJobs.durationMs}), 0)`,
-        costVnd: sql<string>`coalesce(sum(${htmlRenderJobs.costVnd}), 0)`,
-      })
-      .from(htmlRenderJobs)
-      .where(done);
-
-    const dailyRows = await this.db
-      .select({
-        day: sql<string>`to_char(${htmlRenderJobs.createdAt} at time zone 'UTC', 'YYYY-MM-DD')`,
-        count: sql<string>`count(*)`,
-      })
-      .from(htmlRenderJobs)
-      .where(and(done, sql`${htmlRenderJobs.createdAt} >= now() - interval '${sql.raw(String(TREND_DAYS))} days'`))
-      .groupBy(sql`1`);
-    const countByDay = new Map(dailyRows.map((row) => [row.day, Number(row.count)]));
-    const daily = Array.from({ length: TREND_DAYS }, (_, index) => {
-      const date = new Date();
-      date.setUTCDate(date.getUTCDate() - (TREND_DAYS - 1 - index));
-      const day = date.toISOString().slice(0, 10);
-      return { date: day, count: countByDay.get(day) ?? 0 };
+      return { purchaseId: purchase.id, owned: true, charged: true, creditsCharged: template.creditCost, balance };
     });
-
-    const recentRows = await this.db
-      .select({ id: htmlRenderJobs.id, title: projects.title, durationMs: htmlRenderJobs.durationMs })
-      .from(htmlRenderJobs)
-      .leftJoin(projects, eq(projects.id, htmlRenderJobs.projectId))
-      .where(done)
-      .orderBy(desc(htmlRenderJobs.createdAt))
-      .limit(RECENT_LIMIT);
-
-    const workspace = await this.quotas.getWorkspaceOrThrow(workspaceId);
-    const projectLimit = await this.quotas.getActiveProjectLimit(workspace);
-    const projectCount = await this.db.$count(
-      projects,
-      and(eq(projects.workspaceId, workspaceId), isNull(projects.deletedAt)),
-    );
-
-    return {
-      exportedCount: Number(totals?.count ?? 0),
-      totalDurationMs: Number(totals?.durationMs ?? 0),
-      totalCostVnd: Number(totals?.costVnd ?? 0),
-      daily,
-      recent: recentRows.map((row) => ({ id: row.id, title: row.title ?? "", durationMs: row.durationMs ?? 0 })),
-      projectCount,
-      projectLimit,
-    };
-  }
-
-  async getDownloadUrl(userId: string, jobId: string) {
-    const job = await this.db.query.htmlRenderJobs.findFirst({ where: eq(htmlRenderJobs.id, jobId) });
-    if (!job) throw new ApiError(404, "Export not found");
-    await this.requireViewer(userId, job.workspaceId);
-    if (job.status !== "done" || !job.outputKey) throw new ApiError(409, "Export is not ready", "export_not_ready");
-    return this.r2.presignGet("R2_USER_EXPORTS_BUCKET", job.outputKey, DOWNLOAD_TTL_SECONDS);
   }
 }

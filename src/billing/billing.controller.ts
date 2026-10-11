@@ -1,38 +1,84 @@
-import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Req, UseGuards } from "@nestjs/common";
-import type { Request } from "express";
+import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from "@nestjs/common";
+import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { Type } from "class-transformer";
+import { IsBoolean, IsInt, IsOptional, IsString, Max, Min, MinLength } from "class-validator";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { CurrentUserGuard } from "../auth/current-user.guard";
-import { BillingService } from "./billing.service";
-import { CreateCheckoutDto } from "./dto/create-checkout.dto";
-import { CreatePayosOrderDto } from "./dto/create-payos-order.dto";
+import { RolesGuard } from "../auth/roles.guard";
+import { decodeCursor, parseLimit } from "../common/pagination";
+import { CreditsService } from "../credits/credits.service";
+import { IapService } from "../iap/iap.service";
+import { PacksService } from "./packs.service";
 
+class CreatePurchaseDto {
+  /** StoreKit 2 `jwsRepresentation` of the finished transaction. */
+  @IsString() @MinLength(10) signedTransaction!: string;
+}
+
+class UpsertPackDto {
+  @Type(() => Number) @IsInt() @Min(1) @Max(1_000_000) credits!: number;
+  @IsOptional() @IsBoolean() active?: boolean;
+  @IsOptional() @Type(() => Number) @IsInt() sortOrder?: number;
+}
+
+@ApiTags("Billing")
+@ApiBearerAuth()
 @UseGuards(CurrentUserGuard)
 @Controller("v1/billing")
 export class BillingController {
-  constructor(private readonly billing: BillingService) {}
+  constructor(
+    private readonly credits: CreditsService,
+    private readonly iap: IapService,
+    private readonly packs: PacksService,
+  ) {}
+
+  @Get("packs")
+  @ApiOperation({ summary: "Credit packs on sale (price text comes from StoreKit)" })
+  listPacks() {
+    return this.packs.listActive();
+  }
 
   @Get("balance")
+  @ApiOperation({ summary: "Current credit balance" })
   async balance(@CurrentUser() userId: string) {
-    return { balanceVnd: await this.billing.getBalanceVnd(userId) };
+    return { balance: await this.credits.getBalance(userId) };
   }
 
-  @Post("checkout")
-  @HttpCode(200)
-  async checkout(@CurrentUser() userId: string, @Body() dto: CreateCheckoutDto, @Req() req: Request) {
-    const origin = req.headers.origin ?? process.env.WEB_APP_URL ?? "";
-    return this.billing.createTopupCheckout(userId, origin, dto.amountUsd);
+  @Get("ledger")
+  @ApiOperation({ summary: "Credit history, newest first. Page with ?cursor=<nextCursor>" })
+  ledger(@CurrentUser() userId: string, @Query("limit") limit?: string, @Query("cursor") cursor?: string) {
+    return this.credits.listLedger(userId, parseLimit(limit, 50, 100), decodeCursor(cursor));
   }
 
-  // Creates a VND payment and returns the dynamic VietQR payload for it.
-  @Post("payos/orders")
-  @HttpCode(200)
-  async createPayosOrder(@CurrentUser() userId: string, @Body() dto: CreatePayosOrderDto, @Req() req: Request) {
-    const origin = req.headers.origin ?? process.env.WEB_APP_URL ?? "";
-    return this.billing.createPayosOrder(userId, origin, dto.amountVnd);
+  @Post("purchases")
+  @ApiOperation({ summary: "Verify an App Store purchase and credit it (safe to retry)" })
+  createPurchase(@CurrentUser() userId: string, @Body() body: CreatePurchaseDto) {
+    return this.iap.verifyPurchase(userId, body.signedTransaction);
   }
 
-  @Get("payos/orders/:orderCode")
-  async getPayosOrder(@CurrentUser() userId: string, @Param("orderCode", ParseIntPipe) orderCode: number) {
-    return this.billing.getPayosOrder(userId, orderCode);
+  @Get("purchases")
+  @ApiOperation({ summary: "Purchase history, newest first" })
+  listPurchases(@CurrentUser() userId: string, @Query("limit") limit?: string, @Query("cursor") cursor?: string) {
+    return this.iap.listPurchases(userId, parseLimit(limit, 50, 100), decodeCursor(cursor));
+  }
+}
+
+@ApiTags("Admin")
+@ApiBearerAuth()
+@UseGuards(CurrentUserGuard, RolesGuard("admin"))
+@Controller("v1/admin/credit-packs")
+export class AdminCreditPacksController {
+  constructor(private readonly packs: PacksService) {}
+
+  @Get()
+  @ApiOperation({ summary: "All credit packs, including inactive" })
+  list() {
+    return this.packs.listAll();
+  }
+
+  @Put(":productId")
+  @ApiOperation({ summary: "Create or update a pack (productId = App Store Connect product id)" })
+  upsert(@Param("productId") productId: string, @Body() body: UpsertPackDto) {
+    return this.packs.upsert(productId, body);
   }
 }

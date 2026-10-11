@@ -1,33 +1,18 @@
 import { Module } from "@nestjs/common";
-import { AccountModule } from "./account/account.module";
 import { AppController } from "./app.controller";
-import { AssetsModule } from "./assets/assets.module";
-import { AuditEventsModule } from "./audit-events/audit-events.module";
 import { BillingModule } from "./billing/billing.module";
+import { CreditsModule } from "./credits/credits.module";
+import { DevModule } from "./dev/dev.module";
+import { env } from "./env";
 import { DatabaseModule } from "./db/database.module";
 import { ExportsModule } from "./exports/exports.module";
-import { FontsModule } from "./fonts/fonts.module";
+import { IapModule } from "./iap/iap.module";
 import { ProfileModule } from "./profile/profile.module";
-import { ProjectsModule } from "./projects/projects.module";
-import { SystemCatalogModule } from "./system-catalog/system-catalog.module";
-import { ApiKeysModule } from "./api-keys/api-keys.module";
-import { WorkspacesModule } from "./workspaces/workspaces.module";
+import { PayoutsModule } from "./payouts/payouts.module";
+import { TemplatesModule } from "./templates/templates.module";
 
 @Module({
-  imports: [
-    DatabaseModule,
-    WorkspacesModule,
-    ProjectsModule,
-    AssetsModule,
-    FontsModule,
-    ExportsModule,
-    AuditEventsModule,
-    BillingModule,
-    ApiKeysModule,
-    ProfileModule,
-    SystemCatalogModule,
-    AccountModule,
-  ],
+  imports: [DatabaseModule, ProfileModule, CreditsModule, IapModule, BillingModule, TemplatesModule, ExportsModule, PayoutsModule, ...(env.devAuthBypass ? [DevModule] : [])],
   controllers: [AppController],
 })
 export class AppModule {}

@@ -4,23 +4,30 @@ function required(name: string): string {
   return value;
 }
 
+function optional(name: string): string | undefined {
+  return process.env[name]?.trim() || undefined;
+}
+
+// Dev-only: lets requests act as any user via `X-Dev-User`, skipping sign-in. Refused in production.
+const devAuthBypass = process.env.DEV_AUTH_BYPASS?.trim() === "true";
+if (devAuthBypass && process.env.NODE_ENV === "production") {
+  throw new Error("DEV_AUTH_BYPASS must never be enabled in production");
+}
+
 export const env = {
+  devAuthBypass,
   port: Number(process.env.PORT ?? 8080),
   databaseUrl: required("DATABASE_URL"),
   betterAuthSecret: required("BETTER_AUTH_SECRET"),
-  betterAuthUrl: process.env.BETTER_AUTH_URL?.trim() || `http://localhost:${process.env.PORT ?? 8080}`,
-  webAppUrl: process.env.WEB_APP_URL?.trim() || "http://localhost:3000",
+  betterAuthUrl: optional("BETTER_AUTH_URL") ?? `http://localhost:${process.env.PORT ?? 8080}`,
+  appBundleId: optional("APP_BUNDLE_ID") ?? "com.neonix.editor",
+  appleAppId: optional("APPLE_APP_ID") ? Number(optional("APPLE_APP_ID")) : undefined,
+  // Apple sign-in is enabled only when both are set (Google first, Apple later).
+  appleClientId: optional("APPLE_CLIENT_ID"),
+  appleClientSecret: optional("APPLE_CLIENT_SECRET"),
   googleClientId: required("GOOGLE_CLIENT_ID"),
   googleClientSecret: required("GOOGLE_CLIENT_SECRET"),
-  // Comma-separated list of additional origins (marketing site, preview
-  // deployments) allowed to call the API/auth endpoints with credentials,
-  // beyond webAppUrl itself. See auth.ts's trustedOrigins/CORS wiring.
-  additionalTrustedOrigins: (process.env.ADDITIONAL_TRUSTED_ORIGINS ?? "")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean),
-  // The registrable domain shared by api.neonix.video and app.neonix.video,
-  // used for Better Auth's cross-subdomain session cookie. Empty in local
-  // dev (both sides are on localhost, no shared parent domain to scope to).
-  cookieDomain: process.env.COOKIE_DOMAIN?.trim() || undefined,
+  // Starting values for new templates; the admin can change them per template.
+  defaultExportCredits: Number(optional("DEFAULT_EXPORT_CREDITS") ?? 6),
+  defaultCreatorEarningVnd: Number(optional("DEFAULT_CREATOR_EARNING_VND") ?? 0),
 };

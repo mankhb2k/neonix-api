@@ -1,10 +1,6 @@
-import { pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core";
+import { boolean, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
-// Better Auth's core schema (user/session/account/verification), hand-authored
-// against its documented Drizzle shape - `pnpm run auth:schema` failed in this
-// monorepo (a version clash between @better-auth/cli's own vendored
-// better-auth/better-call and this package's) and should be retried once that
-// resolves, to confirm this matches byte-for-byte instead of by hand.
+// Better Auth core tables (user/session/account/verification).
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),

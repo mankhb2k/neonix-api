@@ -1,1 +1,0 @@
-ALTER TABLE "project_assets" ADD COLUMN "path" text;

@@ -1,12 +1,12 @@
 import { Module } from "@nestjs/common";
-import { BillingController } from "./billing.controller";
-import { BillingService } from "./billing.service";
-import { PayosService } from "./payos.service";
-import { PolarService } from "./polar.service";
-import { WebhooksController } from "./webhooks.controller";
+import { CreditsModule } from "../credits/credits.module";
+import { IapModule } from "../iap/iap.module";
+import { AdminCreditPacksController, BillingController } from "./billing.controller";
+import { PacksService } from "./packs.service";
 
 @Module({
-  controllers: [BillingController, WebhooksController],
-  providers: [BillingService, PolarService, PayosService],
+  imports: [CreditsModule, IapModule],
+  controllers: [BillingController, AdminCreditPacksController],
+  providers: [PacksService],
 })
 export class BillingModule {}

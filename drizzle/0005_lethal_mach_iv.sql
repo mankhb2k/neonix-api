@@ -1,0 +1,1 @@
+ALTER TABLE "templates" ADD COLUMN "poster_key" text;
