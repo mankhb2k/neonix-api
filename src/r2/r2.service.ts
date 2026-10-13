@@ -7,13 +7,16 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 //  - templates: private template zips, only via short-lived presigned URLs
 //  - previews:  public template preview images/videos, served from R2_TEMPLATE_PREVIEWS_URL
 //  - avatars:   public user avatars, served from R2_AVATARS_URL
-export type Bucket = "templates" | "previews" | "avatars";
-export type PublicBucket = Exclude<Bucket, "templates">;
+//  - system:    Neonix's own assets (stickers/ ...); R2_SYSTEM_ASSETS_URL is optional - without it the API hands out
+//               short-lived presigned URLs instead of public ones (`systemAssetUrl`)
+export type Bucket = "templates" | "previews" | "avatars" | "system";
+export type PublicBucket = "previews" | "avatars";
 
 const BUCKET_ENV: Record<Bucket, string> = {
   templates: "R2_TEMPLATES_BUCKET",
   previews: "R2_TEMPLATE_PREVIEWS_BUCKET",
   avatars: "R2_AVATARS_BUCKET",
+  system: "R2_SYSTEM_ASSETS_BUCKET",
 };
 const PUBLIC_URL_ENV: Record<PublicBucket, string> = {
   previews: "R2_TEMPLATE_PREVIEWS_URL",
@@ -71,6 +74,19 @@ export class R2Service {
   publicUrl(bucket: PublicBucket, key: string | null): string | null {
     if (!key) return null;
     return `${requiredEnv(PUBLIC_URL_ENV[bucket]).replace(/\/$/, "")}/${key}`;
+  }
+
+  /** A URL for one of Neonix's own assets: public when R2_SYSTEM_ASSETS_URL is set, otherwise presigned for an hour. */
+  async systemAssetUrl(key: string): Promise<string> {
+    const base = process.env.R2_SYSTEM_ASSETS_URL?.trim();
+    if (base) return `${base.replace(/\/$/, "")}/${key}`;
+    return (await this.presignGet("system", key, 3600)).url;
+  }
+
+  /** Reads a small text object (a manifest). */
+  async getText(bucket: Bucket, key: string): Promise<string> {
+    const result = await this.ensureClient().send(new GetObjectCommand({ Bucket: this.bucketName(bucket), Key: key }));
+    return (await result.Body?.transformToString("utf-8")) ?? "";
   }
 
   async presignPut(bucket: Bucket, key: string, contentType: string, expiresInSeconds = 900) {
