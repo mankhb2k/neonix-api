@@ -30,4 +30,6 @@ export const env = {
   // Starting values for new templates; the admin can change them per template.
   defaultExportCredits: Number(optional("DEFAULT_EXPORT_CREDITS") ?? 6),
   defaultCreatorEarningVnd: Number(optional("DEFAULT_CREATOR_EARNING_VND") ?? 0),
+  // A creator is paid once the unpaid purchases of their templates reach this many; below it they keep accumulating.
+  payoutMinPurchases: Number(optional("PAYOUT_MIN_PURCHASES") ?? 100),
 };

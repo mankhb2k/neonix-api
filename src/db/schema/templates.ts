@@ -85,7 +85,7 @@ export const templatePurchases = pgTable("template_purchases", {
   creatorId: text("creator_id").references(() => user.id, { onDelete: "set null" }),
   creatorEarningVnd: integer("creator_earning_vnd").notNull().default(0),
   /** Set when the earning is included in a weekly payout. */
-  payoutId: uuid("payout_id").references(() => payouts.id, { onDelete: "set null" }),
+  payoutId: uuid("payout_id").references(() => payouts.id, { onDelete: "restrict" }),
   /** Exports so far, the paying one included. Free exports only bump this. */
   exportCount: integer("export_count").notNull().default(1),
   lastExportedAt: timestamp("last_exported_at", { withTimezone: true }).notNull().defaultNow(),

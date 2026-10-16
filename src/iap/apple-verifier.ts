@@ -23,6 +23,9 @@ function getVerifiers(): SignedDataVerifier[] {
     // Apple requires the numeric app id to verify production signatures.
     ...(env.appleAppId ? [new SignedDataVerifier(rootCAs, false, Environment.PRODUCTION, env.appBundleId, env.appleAppId)] : []),
     new SignedDataVerifier(rootCAs, false, Environment.SANDBOX, env.appBundleId),
+    // Xcode's StoreKit testing signs with a local certificate, so the library skips the signature check for this
+    // environment: accepted only under DEV_AUTH_BYPASS (env.ts refuses that in production).
+    ...(env.devAuthBypass ? [new SignedDataVerifier(rootCAs, false, Environment.XCODE, env.appBundleId)] : []),
   ];
   return verifiers;
 }

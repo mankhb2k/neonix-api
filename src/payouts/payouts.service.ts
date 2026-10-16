@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { ApiError } from "../common/api-error";
+import { env } from "../env";
 import type { Database } from "../db/client";
 import { DATABASE } from "../db/database.module";
 import { creatorPayoutAccounts, payouts } from "../db/schema/payouts";
@@ -49,7 +50,13 @@ export class PayoutsService {
       .from(payouts)
       .where(and(eq(payouts.creatorId, creatorId), eq(payouts.status, "paid")));
     const history = await this.db.select().from(payouts).where(eq(payouts.creatorId, creatorId)).orderBy(desc(payouts.periodEnd)).limit(52);
-    return { unpaidVnd: unpaid.amount, unpaidExports: unpaid.count, paidVnd: Number(paid.amount), payouts: history };
+    return {
+      unpaidVnd: unpaid.amount,
+      unpaidExports: unpaid.count,
+      minPurchases: env.payoutMinPurchases,
+      paidVnd: Number(paid.amount),
+      payouts: history,
+    };
   }
 
   // ---- admin ----
@@ -57,7 +64,9 @@ export class PayoutsService {
   /**
    * Weekly run (admin triggers it, e.g. every Monday): one pending payout per
    * creator for everything payable before the end of the last finished week.
-   * Creators without a bank account are skipped; their earnings roll over.
+   * Creators below `PAYOUT_MIN_PURCHASES` unpaid purchases, or without a bank
+   * account, are skipped; their earnings accumulate and roll over to a later week.
+   * Over the threshold, everything unpaid is paid (not just the threshold's worth).
    */
   async generateWeekly(now = new Date()) {
     const { start, end } = lastFullWeek(now);
@@ -68,6 +77,7 @@ export class PayoutsService {
 
     const created: { creatorId: string; amountVnd: number; exportsCount: number }[] = [];
     const skippedNoAccount: string[] = [];
+    const skippedBelowThreshold: string[] = [];
 
     for (const { creatorId } of creators) {
       if (!creatorId) continue;
@@ -81,6 +91,10 @@ export class PayoutsService {
         if (already) return null;
         const rows = await tx.select({ id: templatePurchases.id, earning: templatePurchases.creatorEarningVnd }).from(templatePurchases).where(payableExports(creatorId, end)).for("update");
         if (rows.length === 0) return null;
+        if (rows.length < env.payoutMinPurchases) {
+          skippedBelowThreshold.push(creatorId);
+          return null;
+        }
         const amountVnd = rows.reduce((sum, r) => sum + r.earning, 0);
         const [payout] = await tx
           .insert(payouts)
@@ -100,7 +114,7 @@ export class PayoutsService {
       });
       if (result) created.push(result);
     }
-    return { periodStart: start, periodEnd: end, created, skippedNoAccount };
+    return { periodStart: start, periodEnd: end, created, skippedNoAccount, skippedBelowThreshold };
   }
 
   async list(status?: "pending" | "paid") {
