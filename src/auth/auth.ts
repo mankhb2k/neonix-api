@@ -11,7 +11,7 @@ import { provisionNewUser } from "./provision";
 export const auth = betterAuth({
   secret: env.betterAuthSecret,
   baseURL: env.betterAuthUrl,
-  trustedOrigins: [env.betterAuthUrl],
+  trustedOrigins: [env.betterAuthUrl, ...env.webOrigins],
   database: drizzleAdapter(db, { provider: "pg", schema }),
   // Sign-in is Google + Apple only; no email/password.
   emailAndPassword: { enabled: false },

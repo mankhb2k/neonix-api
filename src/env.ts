@@ -30,6 +30,15 @@ export const env = {
   // Starting values for new templates; the admin can change them per template.
   defaultExportCredits: Number(optional("DEFAULT_EXPORT_CREDITS") ?? 6),
   defaultCreatorEarningVnd: Number(optional("DEFAULT_CREATOR_EARNING_VND") ?? 0),
+  // Browser origins allowed to call this API with cookies (the Neonix website). Comma separated; the first is the default
+  // return address for payOS.
+  webOrigins: (optional("WEB_ORIGINS") ?? "http://localhost:3000").split(",").map((origin) => origin.trim().replace(/\/+$/, "")).filter(Boolean),
+  // Web top-ups (payOS). All three must be set for /v1/billing/payos/* to work; the API boots without them.
+  payosClientId: optional("PAYOS_CLIENT_ID"),
+  payosApiKey: optional("PAYOS_API_KEY"),
+  payosChecksumKey: optional("PAYOS_CHECKSUM_KEY"),
+  // Price of one credit on the web: 1.000 VND buys 10 credits, so one credit is 100 VND.
+  vndPerCredit: Number(optional("VND_PER_CREDIT") ?? 100),
   // A creator is paid once the unpaid purchases of their templates reach this many; below it they keep accumulating.
   payoutMinPurchases: Number(optional("PAYOUT_MIN_PURCHASES") ?? 100),
 };

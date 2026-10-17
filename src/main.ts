@@ -6,6 +6,7 @@ import { toNodeHandler } from "better-auth/node";
 import express from "express";
 import { AppModule } from "./app.module";
 import { auth } from "./auth/auth";
+import { corsMiddleware } from "./common/cors";
 import { env } from "./env";
 
 async function bootstrap() {
@@ -13,6 +14,7 @@ async function bootstrap() {
   // before express.json().
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   const expressInstance = app.getHttpAdapter().getInstance();
+  expressInstance.use(corsMiddleware(env.webOrigins));
   expressInstance.all("/api/auth/*splat", toNodeHandler(auth));
   app.use(express.json());
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, Param, ParseIntPipe, Post, Put, Query, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { Type } from "class-transformer";
 import { IsBoolean, IsInt, IsOptional, IsString, Max, Min, MinLength } from "class-validator";
@@ -8,11 +8,17 @@ import { RolesGuard } from "../auth/roles.guard";
 import { decodeCursor, parseLimit } from "../common/pagination";
 import { CreditsService } from "../credits/credits.service";
 import { IapService } from "../iap/iap.service";
+import { env } from "../env";
 import { PacksService } from "./packs.service";
+import { MAX_TOPUP_VND, MIN_TOPUP_VND, TopupsService, creditsForVnd } from "./topups.service";
 
 class CreatePurchaseDto {
   /** StoreKit 2 `jwsRepresentation` of the finished transaction. */
   @IsString() @MinLength(10) signedTransaction!: string;
+}
+
+class CreatePayosOrderDto {
+  @Type(() => Number) @IsInt() @Min(MIN_TOPUP_VND) @Max(MAX_TOPUP_VND) amountVnd!: number;
 }
 
 class UpsertPackDto {
@@ -30,6 +36,7 @@ export class BillingController {
     private readonly credits: CreditsService,
     private readonly iap: IapService,
     private readonly packs: PacksService,
+    private readonly topups: TopupsService,
   ) {}
 
   @Get("packs")
@@ -48,6 +55,27 @@ export class BillingController {
   @ApiOperation({ summary: "Credit history, newest first. Page with ?cursor=<nextCursor>" })
   ledger(@CurrentUser() userId: string, @Query("limit") limit?: string, @Query("cursor") cursor?: string) {
     return this.credits.listLedger(userId, parseLimit(limit, 50, 100), decodeCursor(cursor));
+  }
+
+  @Get("topup-rates")
+  @ApiOperation({ summary: "Web top-up pricing: limits and what 1.000 VND buys" })
+  topupRates() {
+    return { minVnd: MIN_TOPUP_VND, maxVnd: MAX_TOPUP_VND, creditsPer1000Vnd: creditsForVnd(1000) };
+  }
+
+  @Post("payos/orders")
+  @HttpCode(200)
+  @ApiOperation({ summary: "Start a web top-up: returns a VietQR payment for the amount (website only)" })
+  createPayosOrder(@CurrentUser() userId: string, @Body() body: CreatePayosOrderDto, @Headers("origin") origin?: string) {
+    // Only ever redirect back to our own site, whatever the request claims.
+    const returnOrigin = origin && env.webOrigins.includes(origin) ? origin : env.webOrigins[0];
+    return this.topups.createOrder(userId, returnOrigin, body.amountVnd);
+  }
+
+  @Get("payos/orders/:orderCode")
+  @ApiOperation({ summary: "Status of a web top-up; credits are granted once it is paid" })
+  getPayosOrder(@CurrentUser() userId: string, @Param("orderCode", ParseIntPipe) orderCode: number) {
+    return this.topups.getOrder(userId, orderCode);
   }
 
   @Post("purchases")

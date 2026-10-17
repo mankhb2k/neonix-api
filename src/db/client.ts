@@ -6,6 +6,7 @@ import * as creditsSchema from "./schema/credits";
 import * as payoutsSchema from "./schema/payouts";
 import * as profileSchema from "./schema/profile";
 import * as templatesSchema from "./schema/templates";
+import * as topupsSchema from "./schema/topups";
 
 export const pool = new Pool({ connectionString: env.databaseUrl });
 
@@ -15,6 +16,7 @@ export const schema = {
   ...creditsSchema,
   ...payoutsSchema,
   ...templatesSchema,
+  ...topupsSchema,
 };
 
 export const db = drizzle(pool, { schema });
