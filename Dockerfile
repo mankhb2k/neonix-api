@@ -1,6 +1,6 @@
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app
-RUN corepack enable
+RUN corepack enable && corepack prepare pnpm@10.33.2 --activate
 COPY package.json pnpm-lock.yaml* ./
 RUN pnpm install
 COPY tsconfig.json ./
