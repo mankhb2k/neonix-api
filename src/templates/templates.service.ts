@@ -58,12 +58,12 @@ export class TemplatesService {
 
   // ---- public catalogue ----
 
-  async list(userId: string, opts: { category?: string; q?: string; limit: number; cursor?: Cursor }) {
+  async list(userId: string | undefined, opts: { category?: string; q?: string; limit: number; cursor?: Cursor }) {
     const rows = await this.db
       .select({ template: templates, creator: { name: profiles.displayName, avatarKey: profiles.avatarKey }, version: templateVersions, purchaseId: templatePurchases.id })
       .from(templates)
       .leftJoin(profiles, eq(profiles.id, templates.creatorId))
-      .leftJoin(templatePurchases, and(eq(templatePurchases.templateId, templates.id), eq(templatePurchases.userId, userId)))
+      .leftJoin(templatePurchases, and(eq(templatePurchases.templateId, templates.id), eq(templatePurchases.userId, userId ?? "")))
       .innerJoin(templateVersions, eq(templateVersions.id, templates.currentVersionId))
       .where(
         and(
@@ -76,21 +76,21 @@ export class TemplatesService {
       .orderBy(desc(msTrunc(templates.updatedAt)), desc(templates.id))
       .limit(opts.limit + 1);
     const page = toPage(rows, opts.limit, (r) => ({ t: r.template.updatedAt.toISOString(), id: r.template.id }));
-    return { items: page.items.map((r) => this.view(r.template, r.creator ?? undefined, r.version, r.purchaseId !== null)), nextCursor: page.nextCursor };
+    return { items: page.items.map((r) => this.view(r.template, r.creator ?? undefined, r.version, userId ? r.purchaseId !== null : undefined)), nextCursor: page.nextCursor };
   }
 
-  async getPublished(userId: string, id: string) {
+  async getPublished(userId: string | undefined, id: string) {
     const [row] = await this.db
       .select({ template: templates, creator: { name: profiles.displayName, avatarKey: profiles.avatarKey }, purchaseId: templatePurchases.id })
       .from(templates)
       .leftJoin(profiles, eq(profiles.id, templates.creatorId))
-      .leftJoin(templatePurchases, and(eq(templatePurchases.templateId, templates.id), eq(templatePurchases.userId, userId)))
+      .leftJoin(templatePurchases, and(eq(templatePurchases.templateId, templates.id), eq(templatePurchases.userId, userId ?? "")))
       .where(and(eq(templates.id, id), eq(templates.status, "published")));
     if (!row || !row.template.currentVersionId) throw new ApiError(404, "Template not found");
     const version = await this.db.query.templateVersions.findFirst({
       where: eq(templateVersions.id, row.template.currentVersionId),
     });
-    return this.view(row.template, row.creator ?? undefined, version, row.purchaseId !== null);
+    return this.view(row.template, row.creator ?? undefined, version, userId ? row.purchaseId !== null : undefined);
   }
 
   /**

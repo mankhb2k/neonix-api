@@ -7,7 +7,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 //  - templates: private template zips, only via short-lived presigned URLs
 //  - previews:  public template preview images/videos, served from R2_TEMPLATE_PREVIEWS_URL
 //  - avatars:   public user avatars, served from R2_AVATARS_URL
-//  - system:    Neonix's own assets (stickers/ ...); R2_SYSTEM_ASSETS_URL is optional - without it the API hands out
+//  - system:    Neonix's own assets (stickers/, soudeffects/ ...); R2_SYSTEM_ASSETS_URL is optional - without it the API hands out
 //               short-lived presigned URLs instead of public ones (`systemAssetUrl`)
 export type Bucket = "templates" | "previews" | "avatars" | "system";
 export type PublicBucket = "previews" | "avatars";

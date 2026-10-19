@@ -43,23 +43,21 @@ class CompleteUploadDto {
   @Type(() => Number) @IsInt() @Min(100) @Max(3_600_000) durationMs!: number;
 }
 
-/** Catalogue any signed-in user can browse. */
+/** Public catalogue and package downloads. Creator management remains protected below. */
 @ApiTags("Templates")
-@ApiBearerAuth()
-@UseGuards(CurrentUserGuard)
 @Controller("v1/templates")
 export class TemplatesController {
   constructor(private readonly templates: TemplatesService) {}
 
   @Get()
   @ApiOperation({ summary: "Browse published templates, newest first. Page with ?cursor=<nextCursor>" })
-  list(@CurrentUser() userId: string, @Query("category") category?: string, @Query("q") q?: string, @Query("limit") limit?: string, @Query("cursor") cursor?: string) {
-    return this.templates.list(userId, { category, q, limit: parseLimit(limit, 20, 50), cursor: decodeCursor(cursor) });
+  list(@Query("category") category?: string, @Query("q") q?: string, @Query("limit") limit?: string, @Query("cursor") cursor?: string) {
+    return this.templates.list(undefined, { category, q, limit: parseLimit(limit, 20, 50), cursor: decodeCursor(cursor) });
   }
 
   @Get(":id")
-  get(@CurrentUser() userId: string, @Param("id", ParseUUIDPipe) id: string) {
-    return this.templates.getPublished(userId, id);
+  get(@Param("id", ParseUUIDPipe) id: string) {
+    return this.templates.getPublished(undefined, id);
   }
 
   /** Presigned download of the template zip, free: credits are spent at export. */
