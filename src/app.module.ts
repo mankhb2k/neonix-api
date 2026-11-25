@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AppController } from "./app.controller";
+import { DeviceController } from "./auth/device.controller";
 import { BillingModule } from "./billing/billing.module";
 import { CreditsModule } from "./credits/credits.module";
 import { DevModule } from "./dev/dev.module";
@@ -15,6 +16,6 @@ import { TemplatesModule } from "./templates/templates.module";
 
 @Module({
   imports: [DatabaseModule, ProfileModule, CreditsModule, IapModule, BillingModule, TemplatesModule, StickersModule, SoundsModule, ExportsModule, PayoutsModule, ...(env.devAuthBypass ? [DevModule] : [])],
-  controllers: [AppController],
+  controllers: [AppController, DeviceController],
 })
 export class AppModule {}
