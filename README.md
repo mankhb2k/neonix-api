@@ -52,6 +52,17 @@ POST /api/auth/sign-in/social
 - Browser flow (testing): `POST /api/auth/sign-in/social { "provider": "google", "callbackURL": "/" }`
   returns a Google URL; the Google console needs redirect URI `{BETTER_AUTH_URL}/api/auth/callback/google`.
 
+## Sign-in on desktop (through the browser)
+
+The desktop app never shows a login form: it uses Better Auth's device authorization (RFC 8628, `deviceAuthorization()` in `src/auth/auth.ts`).
+
+1. The app `POST /api/auth/device/code { "client_id": "neonix-desktop" }` and gets `device_code`, `user_code`, `verification_uri_complete`, `interval`, `expires_in`. Only the ids in `deviceClients` are accepted.
+2. The app opens `verification_uri_complete` (`GET /device`, served by `src/auth/device.controller.ts`). The page signs the person in with Google on this origin, shows the client and the code, and asks for Approve or Deny (`POST /api/auth/device/approve` or `/deny`). Approve only if the code is the one the app shows.
+3. The app polls `POST /api/auth/device/token { grant_type, device_code, client_id }` every `interval` seconds: `400 authorization_pending` (keep going), `slow_down` (wait 5 s more), `access_denied`, `expired_token`, then `200 { access_token }`. The `access_token` is a session token: send it as `Authorization: Bearer <token>` like the iOS app's, and `GET /api/auth/get-session` says who it is.
+4. Sign out: `POST /api/auth/sign-out` with the Bearer.
+
+The `device_code` table is migration `0010_device_code.sql`. The page is never to be framed (`X-Frame-Options: DENY`, CSP `frame-ancestors 'none'`). In production serve it over HTTPS; the Google console needs `{BETTER_AUTH_URL}/api/auth/callback/google` as a redirect URI, as for the browser flow above. Tests: `src/auth/device-flow.test.ts` (PGlite, the real plugin, over HTTP too) and `src/auth/device-page.test.ts`.
+
 ## Setup
 
 ```

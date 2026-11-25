@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Injectable } from "@nestjs/common";
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 // Three buckets in one Cloudflare account, one purpose each:
@@ -118,5 +118,31 @@ export class R2Service {
 
   async deleteObject(bucket: Bucket, key: string): Promise<void> {
     await this.ensureClient().send(new DeleteObjectCommand({ Bucket: this.bucketName(bucket), Key: key }));
+  }
+
+  /** Delete every object belonging to a user-owned key prefix, including replaced uploads. */
+  async deletePrefix(bucket: Bucket, prefix: string): Promise<void> {
+    const client = this.ensureClient();
+    const bucketName = this.bucketName(bucket);
+    let continuationToken: string | undefined;
+
+    do {
+      const page = await client.send(new ListObjectsV2Command({
+        Bucket: bucketName,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      }));
+      const objects = (page.Contents ?? []).flatMap(({ Key }) => Key ? [{ Key }] : []);
+      if (objects.length) {
+        const result = await client.send(new DeleteObjectsCommand({
+          Bucket: bucketName,
+          Delete: { Objects: objects, Quiet: true },
+        }));
+        if (result.Errors?.length) {
+          throw new Error(`Failed to delete ${result.Errors.length} object(s) from ${bucket}`);
+        }
+      }
+      continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (continuationToken);
   }
 }

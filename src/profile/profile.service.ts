@@ -6,7 +6,8 @@ import type { Database } from "../db/client";
 import { DATABASE } from "../db/database.module";
 import { user } from "../db/schema/auth";
 import { profiles } from "../db/schema/profile";
-import { avatarKey, imageExtension, R2Service } from "../r2/r2.service";
+import { avatarKey, creatorPrefix, imageExtension, R2Service } from "../r2/r2.service";
+import { templates } from "../db/schema/templates";
 
 @Injectable()
 export class ProfileService {
@@ -48,6 +49,21 @@ export class ProfileService {
 
   /** In-app account deletion (App Store requirement); FK cascades remove the rest. */
   async deleteAccount(userId: string) {
+    const ownedTemplates = await this.db
+      .select({ id: templates.id })
+      .from(templates)
+      .where(eq(templates.creatorId, userId));
+
+    // Remove user-owned public and private files before deleting the DB record. If storage
+    // cleanup fails, leave the account intact so the user can retry instead of orphaning files.
+    await this.r2.deletePrefix("avatars", `avatars/${userId}/`);
+    for (const template of ownedTemplates) {
+      const prefix = creatorPrefix(userId, template.id);
+      await Promise.all([
+        this.r2.deletePrefix("templates", prefix),
+        this.r2.deletePrefix("previews", prefix),
+      ]);
+    }
     await this.db.delete(user).where(eq(user.id, userId));
   }
 }
