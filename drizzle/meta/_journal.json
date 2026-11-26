@@ -78,6 +78,13 @@
       "when": 1795600441293,
       "tag": "0010_device_code",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795666945744,
+      "tag": "0011_profile_plan",
+      "breakpoints": true
     }
   ]
 }

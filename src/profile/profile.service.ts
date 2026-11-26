@@ -25,6 +25,7 @@ export class ProfileService {
       displayName: profile.displayName,
       avatarUrl: this.r2.publicUrl("avatars", profile.avatarKey),
       role: profile.role,
+      plan: profile.plan,
       balance: await this.credits.getBalance(userId),
     };
   }
@@ -33,9 +34,14 @@ export class ProfileService {
     if (patch.avatarKey !== undefined && !patch.avatarKey.startsWith(`avatars/${userId}/`)) {
       throw new ApiError(400, "Invalid avatar key", "INVALID_KEY");
     }
+    // Only these two fields, whatever else the caller passes: the plan and the role are not the person's to change.
     await this.db
       .update(profiles)
-      .set({ ...patch, updatedAt: new Date() })
+      .set({
+        ...(patch.displayName !== undefined ? { displayName: patch.displayName } : {}),
+        ...(patch.avatarKey !== undefined ? { avatarKey: patch.avatarKey } : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(profiles.id, userId));
     return this.get(userId);
   }
