@@ -63,6 +63,12 @@ The desktop app never shows a login form: it uses Better Auth's device authoriza
 
 The `device_code` table is migration `0010_device_code.sql`. The page is never to be framed (`X-Frame-Options: DENY`, CSP `frame-ancestors 'none'`). In production serve it over HTTPS; the Google console needs `{BETTER_AUTH_URL}/api/auth/callback/google` as a redirect URI, as for the browser flow above. Tests: `src/auth/device-flow.test.ts` (PGlite, the real plugin, over HTTP too) and `src/auth/device-page.test.ts`.
 
+## Sound-effect library
+
+The built-in sounds live in the system-assets bucket under `soudeffects/`: `manifest.json` (categories, and for each sound its id, name, file, length and waveform peaks) and one file per sound at `soudeffects/<category>/<name>.<mp3|m4a|wav>`. The desktop app reads the manifest and the files straight from the public assets host (`https://assets.neonix.video/`, no sign-in); `GET /v1/sounds` (`src/sounds/`) serves the same catalogue to signed-in clients.
+
+`scripts/publish_sounds.mjs` puts a folder of category folders (kebab-case file names) in the bucket and merges the sounds into the published manifest: `node --env-file=.env scripts/publish_sounds.mjs --src "<folder>"` encodes to `.m4a` and reports what it would do, `--upload` writes it, `--keep-format --manifest-only --upload` publishes only the manifest for files uploaded by hand. A sound with the same id replaces the published one. Tests: `npx vitest run scripts/publish_sounds.test.mjs`.
+
 ## Setup
 
 ```
